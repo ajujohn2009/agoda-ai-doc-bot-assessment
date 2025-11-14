@@ -1,0 +1,15 @@
+
+:root {
+  --bg: #0b1220;
+  --card: #111827;
+  --text: #e5e7eb;
+  --muted: #9ca3af;
+  --accent: #7c3aed;
+}
+* { box-sizing: border-box; }
+body { margin: 0; font-family: ui-sans-serif, system-ui; background: var(--bg); color: var(--text); }
+.container { max-width: 900px; margin: 40px auto; padding: 0 16px; }
+header h1 { margin: 0 0 8px; }
+.card { background: var(--card); padding: 16px; border-radius: 14px; margin: 16px 0; border: 1px solid #222; }
+button { background: var(--accent); color: white; border: none; padding: 10px 16px; border-radius: 10px; cursor: pointer; }
+pre { background: #0f172a; padding: 12px; border-radius: 10px; border: 1px solid #333; }

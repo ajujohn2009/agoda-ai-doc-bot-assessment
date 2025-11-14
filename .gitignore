@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+
+# Virtual environment
+.env
+.venv/
+env/
+venv/
+
+# Python build
+build/
+dist/
+*.egg-info/
+
+# IDE / Editor files
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+
+# Environment files / Secrets
+.env.local
+.env.*.local
+*.env
+secret.key
+*.pem
+*.key
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Cache
+.cache/
+__cache__/
+
+# Uploaded files / Temporary files
+uploads/
+tmp/
