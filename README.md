@@ -1,28 +1,117 @@
-# FastAPI + Vanilla Frontend
+# DocsChat - RAG Document Assistant
+Assesment Application Name: Chat with your document Bot
+The document Q&A application using RAG. Upload documents, ask questions, get answers backed from the uploaded document content.
 
-This is a starting point for building a fast web application with FastAPI and a vanilla frontend.
+## Implementation Note
+
+Built without LangChain or similar frameworks - all RAG components implemented from scratch using direct API calls to demonstrate understanding of core concepts:
+- Custom document chunking logic
+- Direct integration with Sentence Transformers for embeddings
+- Manual vector similarity search with pgvector
+- Direct LLM API calls (OpenAI, Ollama)
+- Custom streaming response handling
+
+## Assumptions
+
+- Users can upload `.pdf`, `.docx`, and `.txt` files
+- AI responses are generated using only uploaded documents
+- English language only
+- No authentication or user management required
 
 ## Features
 
-- FastAPI backend with a single endpoint for a health check
-- Vanilla frontend with a single button to ping the backend
-- Dockerfile for building and running the application
-- Docker Compose file for running the application with multiple services
+- Switch between Ollama (qwen2.5:7b) and OpenAI (gpt-4o-mini) models
+- Upload/delete documents (PDF, DOCX, TXT)
+- Ask questions about uploaded documents
+- Clear chat history
+- Light/dark theme toggle
+- Source citations for AI responses
 
-## How to use
+## Tech Stack
 
-1. Clone the repository
-2. Build the Docker image by running `docker-compose build`
-3. Run the application by running `docker-compose up`
-4. Open a web browser and navigate to `http://localhost:8000`
-5. Click the "Ping Backend" button to see the JSON response from the backend
+**Backend:**
+- FastAPI
+- PostgreSQL + pgvector
+- Sentence Transformers (embeddings)
+- SQLAlchemy
 
-## Road map
+**Frontend:**
+- Vanilla JavaScript
+- Server-Sent Events (SSE streaming responses)
 
-- Add ChatGPT like UI using Vanilla frontend
-- Add functionality to chat with OpenAI
-- Add Functionality to upload pdf, docx and txt from the frontend, and send them to backend for processing
-- Extract and embed document text into a vector database for retrieval
-- Add a UI section to list and manage uploaded documents
-- Implement a RAG pipeline to retrieve relevant text chunks from uploaded documents and generate contextual answers
-/*******  362ff348-f9d4-44f5-9cda-a752f66c42ad  *******/
+**AI:**
+- Ollama (local LLM)
+- OpenAI API (optional)
+
+## Setup
+
+**Prerequisites:**
+- Docker & Docker Compose
+- 8GB RAM (for Ollama)
+- OpenAI API key 
+
+**Install:**
+
+```bash
+# Clone repo
+git clone https://github.com/ajujohn2009/agoda-ai-doc-bot-assessment.git
+cd agoda-ai-doc-bot-assessment
+
+# Create .env file
+cp .env.example .env
+
+# Edit .env and add your OpenAI API key
+nano .env
+```
+
+**.env configuration:**
+```bash
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=ragdb
+OPENAI_API_KEY=your-openai-api-key-here
+OPENAI_MODEL=gpt-4o-mini
+```
+
+**Start services:**
+```bash
+docker-compose build
+docker-compose up
+```
+
+**Access:**
+- UI: http://localhost:8000
+- API docs: http://localhost:8000/docs
+
+> **Note:** First startup takes 10-15 minutes while Ollama downloads the model (~2.8GB)
+
+## Usage
+
+1. Go to **Documents** tab
+2. Upload your files
+3. Switch to **Chat** tab
+4. Ask questions
+5. View answers with source citations
+
+
+
+## Development
+
+**View logs:**
+```bash
+docker-compose logs -f api
+```
+
+**Access database:**
+```bash
+docker-compose exec db psql -U postgres -d ragdb
+```
+
+## How It Works
+
+1. Documents split into chunks (~1200 chars, 150 char overlap)
+2. Each chunk converted to 384-dimensional vector
+3. Vectors stored in PostgreSQL with pgvector
+4. User question embedded and similar chunks retrieved
+5. LLM generates answer using retrieved chunks
+6. Response streamed back in real-time

@@ -1,24 +1,223 @@
-
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Step 1 — FastAPI + Vanilla JS</title>
+  <title>DocsChat AI - Document Intelligence Platform</title>
   <link rel="stylesheet" href="/styles.css" />
+  <!-- Markdown renderer for AI messages -->
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <!-- Google Fonts for better typography -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
 <body>
-  <div class="container">
-    <header>
-      <h1>🚀 Step 1 — FastAPI + Vanilla Frontend</h1>
-      <p>This is the starter scaffold. Next steps will add uploads, search, and RAG.</p>
+  <!-- Sidebar -->
+  <aside class="sidebar" aria-label="Sidebar Navigation">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">
+          <svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <rect width="32" height="32" rx="8" fill="url(#gradient)"/>
+            <path d="M8 12h16M8 16h16M8 20h12" stroke="white" stroke-width="2" stroke-linecap="round"/>
+            <defs>
+              <linearGradient id="gradient" x1="0" y1="0" x2="32" y2="32">
+                <stop offset="0%" stop-color="#3b82f6"/>
+                <stop offset="100%" stop-color="#8b5cf6"/>
+              </linearGradient>
+            </defs>
+          </svg>
+        </div>
+        <div class="logo-text">
+          <div class="logo-title">DocsChat</div>
+          <div class="logo-subtitle">AI Assistant</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-content">
+      <nav class="side-nav" aria-label="Main navigation">
+        <button class="side-link active" data-view="chat">
+          <svg class="nav-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M2 10c0-3.3 2.7-6 6-6h4c3.3 0 6 2.7 6 6v2c0 3.3-2.7 6-6 6h-1l-4 3v-3H6c-3.3 0-6-2.7-6-6v-2z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Chat</span>
+        </button>
+        <button class="side-link" data-view="upload">
+          <svg class="nav-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M3 13v3a2 2 0 002 2h10a2 2 0 002-2v-3M10 3v10m0-10l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span>Documents</span>
+        </button>
+      </nav>
+    </div>
+
+    <div class="sidebar-footer">
+      <button id="clearChatBtn" class="sidebar-action-btn" title="Clear conversation">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+          <path d="M2 4h12M5 4V3a1 1 0 011-1h4a1 1 0 011 1v1M12 4v9a1 1 0 01-1 1H5a1 1 0 01-1-1V4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span>Clear Chat</span>
+      </button>
+      
+      <div class="user-info">
+        <div class="user-avatar">
+          <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="7" r="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M4 17c0-3.3 2.7-6 6-6s6 2.7 6 6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <div class="user-details">
+          <div class="user-name">Guest User</div>
+          <div class="user-status">Active</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main -->
+  <div class="main">
+    <header class="topbar">
+      <button id="mobileMenu" class="mobile-menu-btn only-mobile" aria-label="Toggle sidebar">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+          <path d="M3 6h18M3 12h18M3 18h18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <div class="topbar-title">
+        <h1 id="viewTitle">AI Document Assistant</h1>
+        <p id="viewSubtitle" class="subtitle">Ask questions about your uploaded documents</p>
+      </div>
+
+      <!-- Model picker with enhanced styling -->
+      <div class="controls">
+        <button id="themeToggle" class="icon-btn" aria-label="Toggle theme" title="Toggle dark/light theme">
+          <svg class="theme-icon sun-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <circle cx="10" cy="10" r="3" stroke="currentColor" stroke-width="1.5"/>
+            <path d="M10 1v2M10 17v2M19 10h-2M3 10H1M16.364 16.364l-1.414-1.414M5.05 5.05L3.636 3.636M16.364 3.636l-1.414 1.414M5.05 14.95l-1.414 1.414" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <svg class="theme-icon moon-icon" width="20" height="20" viewBox="0 0 20 20" fill="none">
+            <path d="M17 10.5A7 7 0 1 1 9.5 3a5.5 5.5 0 0 0 7.5 7.5z" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+        
+        <div class="divider"></div>
+        
+        <div class="control-group">
+          <label for="modelSelect" class="control-label">
+            <!-- <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.5"/>
+              <path d="M8 5v6M5 8h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+            </svg> -->
+            Model
+          </label>
+          <select id="modelSelect" class="model-select" aria-label="Choose AI model">
+            <option>Loading models…</option>
+          </select>
+        </div>
+      </div>
     </header>
 
-    <section class="card">
-      <h2>Health Check</h2>
-      <button id="pingBtn">Ping Backend</button>
-      <pre id="healthOut">Click "Ping Backend"…</pre>
+    <!-- Chat view -->
+    <section id="view-chat" class="view active">
+      <div id="chatWindow" class="chat-window" aria-live="polite">
+        <!-- Messages will be inserted here -->
+      </div>
+
+      <div class="composer-wrapper">
+        <form id="chatForm" class="composer" autocomplete="off">
+          <div class="composer-inner">
+            <textarea
+              id="chatInput"
+              class="composer-input"
+              rows="1"
+              placeholder="Ask anything about your documents..."
+              aria-label="Message input"
+            ></textarea>
+            <button class="send-btn" type="submit" aria-label="Send message">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M18 10L2 2l4 8-4 8 16-8z" fill="currentColor"/>
+              </svg>
+            </button>
+          </div>
+          <div class="composer-footer">
+            <div class="composer-hint">
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M7 4v4l2 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+              </svg>
+              <span>Press <kbd>Shift</kbd> + <kbd>Enter</kbd> for new line</span>
+            </div>
+          </div>
+        </form>
+      </div>
     </section>
+
+    <!-- Upload view -->
+    <section id="view-upload" class="view">
+      <div class="upload-container">
+        <div class="upload-header">
+          <h2>Document Management</h2>
+          <p class="section-description">Upload and manage your documents. Supported formats: PDF, DOCX, TXT</p>
+        </div>
+
+        <div class="upload-area">
+          <label class="dropzone" id="dropzone">
+            <div class="dropzone-content">
+              <div class="dropzone-icon">
+                <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
+                  <rect width="48" height="48" rx="24" fill="rgba(59, 130, 246, 0.1)"/>
+                  <path d="M24 16v16m0-16l-6 6m6-6l6 6M16 34h16" stroke="#3b82f6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+              <h3 class="dropzone-title">Drag & drop files here</h3>
+              <p class="dropzone-subtitle">or click to browse from your computer</p>
+              <div class="dropzone-formats">PDF • DOCX • TXT</div>
+            </div>
+            <input id="fileInput" type="file" multiple accept=".pdf,.docx,.txt" hidden aria-label="File upload input">
+          </label>
+
+          <div id="fileList" class="file-queue"></div>
+
+          <div class="upload-actions">
+            <button id="uploadBtn" class="btn-primary" type="button">
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M3 13v3a2 2 0 002 2h10a2 2 0 002-2v-3M10 3v10m0-10l-4 4m4-4l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <span>Upload Documents</span>
+            </button>
+            <span id="uploadStatus" class="upload-status"></span>
+          </div>
+        </div>
+
+        <div class="documents-section">
+          <div class="section-header">
+            <h3>Your Document Library</h3>
+            <div class="document-count" id="docCount">0 documents</div>
+          </div>
+          <div id="docList" class="doc-grid">
+            <div class="empty-state">
+              <svg width="64" height="64" viewBox="0 0 64 64" fill="none">
+                <rect width="64" height="64" rx="32" fill="rgba(148, 163, 184, 0.1)"/>
+                <path d="M24 20h16a4 4 0 014 4v16a4 4 0 01-4 4H24a4 4 0 01-4-4V24a4 4 0 014-4z" stroke="#94a3b8" stroke-width="2"/>
+                <path d="M28 28h8M28 32h8M28 36h5" stroke="#94a3b8" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <p>No documents uploaded yet</p>
+              <p class="empty-subtitle">Upload your first document to get started</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- Loading overlay -->
+  <div id="loadingOverlay" class="loading-overlay hidden">
+    <div class="loading-spinner">
+      <div class="spinner"></div>
+      <p>Processing...</p>
+    </div>
   </div>
 
   <script src="/app.js"></script>
