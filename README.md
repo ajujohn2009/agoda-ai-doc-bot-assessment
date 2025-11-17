@@ -12,15 +12,15 @@ Built without LangChain or similar frameworks - all RAG components implemented f
 - Custom streaming response handling
 
 ## Assumptions
-
-- Users can upload `.pdf`, `.docx`, and `.txt` files
+- In currrent Scope:
+- User can upload `.pdf`, `.docx`, and `.txt` files
 - AI responses are generated using only uploaded documents
-- English language only
+- Supports English language only
 - No authentication or user management required
 
 ## Features
 
-- Switch between Ollama (qwen2.5:7b) and OpenAI (gpt-4o-mini) models
+- Switch between OpenAI (gpt-4o-mini) and Ollama (qwen2.5:7b)  models
 - Upload/delete documents (PDF, DOCX, TXT)
 - Ask questions about uploaded documents
 - Clear chat history
@@ -68,9 +68,11 @@ nano .env
 ```bash
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
-POSTGRES_DB=ragdb
-OPENAI_API_KEY=your-openai-api-key-here
+POSTGRES_DB=agoda_doc_rag_db
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
 OPENAI_MODEL=gpt-4o-mini
+OPENAI_API_KEY=your-openai-api-key-here
 ```
 
 **Start services:**
@@ -104,7 +106,7 @@ docker-compose logs -f api
 
 **Access database:**
 ```bash
-docker-compose exec db psql -U postgres -d ragdb
+docker-compose exec db psql -U postgres -d agoda_doc_rag_db
 ```
 
 ## How It Works

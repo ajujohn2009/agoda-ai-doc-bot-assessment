@@ -10,6 +10,7 @@ from .documents import router as docs_router
 from .upload import router as upload_router
 from .db.migrations import run_sql_migrations
 from .ollama_boot import ensure_ollama_models
+from .embedding import preload_model
 from .logging_config import logger
 
 # -------------------------------------------------
@@ -32,9 +33,13 @@ async def startup_event():
         logger.info("Running database migrations...")
         run_sql_migrations()
         logger.info("Database migrations completed")
+
+        logger.info("Preloading embedding model...")
+        preload_model()
+        logger.info("Embedding model ready")
         
         logger.info("Ensuring Ollama models are available...")
-        ensure_ollama_models()
+        await ensure_ollama_models()
         logger.info("Ollama models ready")
         
     except Exception as e:

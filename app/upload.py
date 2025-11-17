@@ -9,14 +9,42 @@ from .embedding import embed_texts
 
 router = APIRouter(prefix="/api", tags=["documents"])
 
+#Upload File Limit
+MAX_FILES_PER_UPLOAD = 5
+MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024  # 5 MB per file
+
 @router.post("/documents/upload")
 async def upload(files: List[UploadFile] = File(...)):
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded")
 
+    #Check number of files
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Too many files. Maximum {MAX_FILES_PER_UPLOAD} files per upload."
+        )
+
     inserted = []
     with SessionLocal() as db, db.begin():
         for f in files:
+            #Check file size before reading
+            try:
+                f.file.seek(0, os.SEEK_END)
+                size_bytes = f.file.tell()
+                f.file.seek(0)  # reset for later reading
+            except Exception:
+                size_bytes = 0 ## forcing to throw error
+
+            if size_bytes > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        f"File '{f.filename}' is too large. "
+                        f"Max size is {MAX_FILE_SIZE_BYTES // (1024*1024)} MB."
+                    ),
+                )
+
             # save to temp & read text
             with tempfile.NamedTemporaryFile(delete=False) as tmp:
                 shutil.copyfileobj(f.file, tmp)

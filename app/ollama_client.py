@@ -11,7 +11,7 @@ async def stream_ollama_chat(model: str, messages: list):
     async with aiohttp.ClientSession() as session:
         async with session.post(
             f"{OLLAMA_URL}/api/chat",
-            json={"model": model, "messages": messages, "stream": True},
+            json={"model": model, "messages": messages, "stream": True, "keep_alive": "10m"},
         ) as resp:
             async for line in resp.content:
                 try:

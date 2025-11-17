@@ -21,6 +21,10 @@ const viewSubtitle = document.getElementById('viewSubtitle');
 const loadingOverlay = document.getElementById('loadingOverlay');
 const themeToggle = document.getElementById('themeToggle');
 
+// ==================== File Upload Configuration ====================
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB in bytes
+const MAX_FILES = 10; // Maximum number of files allowed
+
 // ==================== State Management ====================
 let messages = [];
 let pendingFiles = [];
@@ -125,9 +129,6 @@ function setActiveView(name) {
   viewUpload.classList.toggle('hidden', name !== 'upload');
 
   document.body.setAttribute('data-current-view', name);
-  
-  // Save current view to localStorage
-  localStorage.setItem('docschat.currentView', name);
 
   if (name === 'chat') {
     viewTitle.textContent = 'AI Document Assistant';
@@ -188,7 +189,9 @@ function appendMsg(role, text, { markdown = false, timestamp = null } = {}) {
   bubble.className = 'bubble chat-message';
   
   if (markdown) {
-    bubble.innerHTML = marked.parse(text || '');
+    // Sanitize markdown output to prevent XSS
+    const rawHTML = marked.parse(text || '');
+    bubble.innerHTML = DOMPurify.sanitize(rawHTML);
   } else {
     bubble.textContent = text || '';
   }
@@ -284,37 +287,143 @@ async function loadConversationHistory() {
         
         // Add sources if available
         if (hasGroundedSources) {
-          const sourcesHTML = `
-            <div class="sources-divider"></div>
-            <div class="sources-block">
-              <div class="sources-title">Sources</div>
-              <ul class="sources-list">
-                ${sources.map((s, index) => `
-                  <li class="source-item" data-source-index="${index}">
-                    <div class="source-header">
-                      <span class="file-icon">
-                        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                          <path d="M8 1H3a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V5l-3-4z" stroke="currentColor" stroke-width="1.5"/>
-                          <path d="M8 1v4h3" stroke="currentColor" stroke-width="1.5"/>
-                        </svg>
-                      </span>
-                      <span class="source-filename">${s.filename}</span>
-                      <span class="source-score">(relevance: ${s.score})</span>
-                      ${s.preview ? `
-                        <button class="expand-btn" onclick="toggleSourcePreview(this)" aria-label="Show excerpt">
-                          <svg class="chevron-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                            <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                          </svg>
-                        </button>
-                      ` : ''}
-                    </div>
-                    ${s.preview ? `<div class="source-preview collapsed">"${s.preview}"</div>` : ''}
-                  </li>
-                `).join('')}
-              </ul>
-            </div>
-          `;
-          bubble.innerHTML += sourcesHTML;
+          // Create sources HTML safely using DOM methods
+          const sourcesDiv = document.createElement('div');
+          sourcesDiv.className = 'sources-divider';
+          
+          const sourcesBlock = document.createElement('div');
+          sourcesBlock.className = 'sources-block';
+          
+          const sourcesTitle = document.createElement('div');
+          sourcesTitle.className = 'sources-title';
+          sourcesTitle.textContent = 'Sources';
+          
+          const sourcesList = document.createElement('ul');
+          sourcesList.className = 'sources-list';
+          
+          sources.forEach(s => {
+            const li = document.createElement('li');
+            li.className = 'source-item';
+            
+            // Create collapsible header
+            const header = document.createElement('div');
+            header.className = 'source-header';
+            header.style.cssText = `
+              display: flex;
+              align-items: center;
+              gap: 8px;
+              cursor: pointer;
+              padding: 8px 12px;
+              border-radius: 6px;
+              transition: background 0.2s;
+            `;
+            
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'file-icon';
+            iconSpan.innerHTML = `
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M8 1H3a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V5l-3-4z" stroke="currentColor" stroke-width="1.5"/>
+                <path d="M8 1v4h3" stroke="currentColor" stroke-width="1.5"/>
+              </svg>
+            `;
+            
+            const filenameText = document.createTextNode(s.filename);
+            
+            const relevanceSpan = document.createElement('span');
+            relevanceSpan.style.cssText = 'opacity: 0.6; margin-left: auto; font-size: 12px;';
+            relevanceSpan.textContent = `(relevance: ${s.score})`;
+            
+            const toggleIcon = document.createElement('span');
+            toggleIcon.innerHTML = '▼';
+            toggleIcon.style.cssText = `
+              font-size: 10px;
+              opacity: 0.6;
+              transition: transform 0.2s;
+            `;
+            
+            header.appendChild(iconSpan);
+            header.appendChild(filenameText);
+            header.appendChild(relevanceSpan);
+            header.appendChild(toggleIcon);
+            
+            // Create preview content (initially hidden)
+            const previewDiv = document.createElement('div');
+            previewDiv.className = 'source-preview';
+            previewDiv.style.cssText = `
+              max-height: 0;
+              overflow: hidden;
+              transition: max-height 0.3s ease;
+              padding: 0 12px;
+              margin-top: 4px;
+            `;
+            
+            const previewContent = document.createElement('div');
+            previewContent.style.cssText = `
+              border-left: 2px solid rgba(59, 130, 246, 0.3);
+              padding: 8px 12px;
+              font-size: 12px;
+              color: #94a3b8;
+              line-height: 1.4;
+              font-style: italic;
+              overflow: hidden;
+              text-overflow: ellipsis;
+            `;
+            
+            const contentText = s.content || s.preview;
+            if (contentText) {
+              // Truncate to ~200 characters for compact display
+              const truncated = contentText.length > 200 
+                ? contentText.substring(0, 200) + '...' 
+                : contentText;
+              previewContent.textContent = `"${truncated}"`;
+            } else {
+              previewContent.style.opacity = '0.6';
+              previewContent.textContent = 'Content preview not available';
+            }
+            
+            previewDiv.appendChild(previewContent);
+            
+            // Toggle functionality
+            let isExpanded = false;
+            header.addEventListener('click', () => {
+              isExpanded = !isExpanded;
+              if (isExpanded) {
+                previewDiv.style.maxHeight = '80px';
+                previewDiv.style.overflow = 'hidden';
+                previewDiv.style.paddingBottom = '8px';
+                toggleIcon.style.transform = 'rotate(180deg)';
+                header.style.background = 'rgba(59, 130, 246, 0.1)';
+              } else {
+                previewDiv.style.maxHeight = '0';
+                previewDiv.style.overflow = 'hidden';
+                previewDiv.style.paddingBottom = '0';
+                toggleIcon.style.transform = 'rotate(0deg)';
+                header.style.background = 'transparent';
+              }
+            });
+            
+            // Hover effect
+            header.addEventListener('mouseenter', () => {
+              if (!isExpanded) {
+                header.style.background = 'rgba(59, 130, 246, 0.05)';
+              }
+            });
+            header.addEventListener('mouseleave', () => {
+              if (!isExpanded) {
+                header.style.background = 'transparent';
+              }
+            });
+            
+            li.appendChild(header);
+            li.appendChild(previewDiv);
+            sourcesList.appendChild(li);
+          });
+          
+          sourcesBlock.appendChild(sourcesTitle);
+          sourcesBlock.appendChild(sourcesList);
+          
+          bubble.appendChild(sourcesDiv);
+          bubble.appendChild(sourcesBlock);
         }
         
         // Add model tag if available
@@ -343,7 +452,10 @@ async function loadConversationHistory() {
 // ==================== File Management ====================
 function renderFilesList() {
   fileList.innerHTML = '';
-  if (!pendingFiles.length) return;
+  if (!pendingFiles.length) {
+    updateUploadButtonState();
+    return;
+  }
 
   const ul = document.createElement('ul');
   pendingFiles.forEach((f, i) => {
@@ -353,7 +465,7 @@ function renderFilesList() {
     fileInfo.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" style="display: inline-block; vertical-align: middle; margin-right: 6px;">
       <path d="M9 1H4a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V6l-5-5z" stroke="currentColor" stroke-width="1.5"/>
       <path d="M9 1v5h5" stroke="currentColor" stroke-width="1.5"/>
-    </svg>${f.name} <span style="opacity: 0.6;">(${(f.size / 1024).toFixed(1)} KB)</span>`;
+    </svg>${f.name} <span style="opacity: 0.6;">(${formatFileSize(f.size)})</span>`;
     
     const removeBtn = document.createElement('button');
     removeBtn.innerHTML = '×';
@@ -369,9 +481,44 @@ function renderFilesList() {
   });
   
   fileList.appendChild(ul);
+  
+  // Update button state after rendering
+  updateUploadButtonState();
 }
 
 // ==================== Model Management ====================
+// Helper function to format file size
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// Helper function to check for duplicate files
+function isDuplicateFile(file) {
+  return pendingFiles.some(existingFile => 
+    existingFile.name === file.name && 
+    existingFile.size === file.size &&
+    existingFile.lastModified === file.lastModified
+  );
+}
+
+// Helper function to update upload button state
+function updateUploadButtonState() {
+  const totalFiles = pendingFiles.length;
+  
+  if (totalFiles === 0) {
+    uploadBtn.disabled = false;
+    uploadBtn.title = '';
+  } else if (totalFiles >= MAX_FILES) {
+    uploadBtn.disabled = true;
+    uploadBtn.title = `Maximum ${MAX_FILES} files allowed`;
+  } else {
+    uploadBtn.disabled = false;
+    uploadBtn.title = '';
+  }
+}
+
 async function loadModels() {
   try {
     const res = await fetch('/api/models');
@@ -587,21 +734,74 @@ dropzone.addEventListener('drop', (e) => {
   dropzone.classList.remove('hover');
   
   const files = [...e.dataTransfer.files];
-  const validFiles = files.filter(f => {
+  let errorMessages = [];
+  let addedCount = 0;
+  
+  files.forEach(f => {
+    // Check file type
     const ext = f.name.split('.').pop().toLowerCase();
-    return ['pdf', 'docx', 'txt'].includes(ext);
+    if (!['pdf', 'docx', 'txt'].includes(ext)) {
+      errorMessages.push(`${f.name}: Invalid file type (only PDF, DOCX, TXT allowed)`);
+      return;
+    }
+    
+    // Check if would exceed max files
+    if (pendingFiles.length + addedCount >= MAX_FILES) {
+      errorMessages.push(`Cannot add ${f.name}: Maximum ${MAX_FILES} files allowed`);
+      return;
+    }
+    
+    // Check for duplicates
+    if (isDuplicateFile(f)) {
+      errorMessages.push(`${f.name}: Duplicate file already in queue`);
+      return;
+    }
+    
+    // Add valid file
+    pendingFiles.push(f);
+    addedCount++;
   });
   
-  if (validFiles.length < files.length) {
-    showStatus('Some files were skipped. Only PDF, DOCX, and TXT files are supported.', 'error');
+  // Show appropriate status message
+  if (errorMessages.length > 0) {
+    showStatus(errorMessages.join('\n'), 'error');
+  } else if (addedCount > 0) {
+    showStatus(`✓ ${addedCount} file${addedCount > 1 ? 's' : ''} added to queue`, 'success');
   }
   
-  pendingFiles.push(...validFiles);
   renderFilesList();
 });
 
 fileInput.addEventListener('change', () => {
-  pendingFiles.push(...fileInput.files);
+  const files = [...fileInput.files];
+  let errorMessages = [];
+  let addedCount = 0;
+  
+  files.forEach(f => {
+    // Check if would exceed max files
+    if (pendingFiles.length + addedCount >= MAX_FILES) {
+      errorMessages.push(`Cannot add ${f.name}: Maximum ${MAX_FILES} files allowed`);
+      return;
+    }
+    
+    // Check for duplicates
+    if (isDuplicateFile(f)) {
+      errorMessages.push(`${f.name}: Duplicate file already in queue`);
+      return;
+    }
+    
+    // Add valid file
+    pendingFiles.push(f);
+    addedCount++;
+  });
+  
+  // Show appropriate status message
+  if (errorMessages.length > 0) {
+    showStatus(errorMessages.join('\n'), 'error');
+  } else if (addedCount > 0) {
+    showStatus(`✓ ${addedCount} file${addedCount > 1 ? 's' : ''} added to queue`, 'success');
+  }
+  
   fileInput.value = '';
   renderFilesList();
 });
@@ -609,6 +809,14 @@ fileInput.addEventListener('change', () => {
 uploadBtn.addEventListener('click', async () => {
   if (!pendingFiles.length) {
     showStatus('Please select files to upload', 'error');
+    return;
+  }
+  
+  // Check for oversized files
+  const oversizedFiles = pendingFiles.filter(f => f.size > MAX_FILE_SIZE);
+  if (oversizedFiles.length > 0) {
+    const fileNames = oversizedFiles.map(f => f.name).join(', ');
+    showStatus(`Cannot upload: ${fileNames} exceed the ${formatFileSize(MAX_FILE_SIZE)} size limit. Please remove them.`, 'error');
     return;
   }
   
@@ -620,7 +828,18 @@ uploadBtn.addEventListener('click', async () => {
   
   try {
     const res = await fetch('/api/documents/upload', { method: 'POST', body: fd });
-    if (!res.ok) throw new Error('Upload failed');
+
+    let data = null;
+    try {
+        data = await res.json();
+    } catch (parseErr) {
+        // If response is not JSON, ignore; we'll fall back to a generic message
+    }
+
+    if (!res.ok) {
+        const msg = '✗ ' + ((data && (data.detail || data.message)) || 'Upload failed. Please try again.');
+        throw new Error(msg);
+    }
     
     showStatus('✓ Documents uploaded and indexed successfully', 'success');
     pendingFiles = [];
@@ -628,7 +847,11 @@ uploadBtn.addEventListener('click', async () => {
     await refreshDocs();
   } catch (e) {
     console.error('Upload error:', e);
-    showStatus('✗ Upload failed. Please try again.', 'error');
+    let default_error = '✗ Upload failed. Please try again.'
+    if(e) {
+        default_error = e
+    }
+    showStatus(default_error, 'error');
   } finally {
     hideLoading();
   }
@@ -688,7 +911,8 @@ chatForm.addEventListener('submit', async (e) => {
     });
     
     if (!res.ok || !res.body) {
-      bubble.innerHTML = marked.parse('⚠️ The server could not complete the request. Please try again.');
+      // Sanitize error message
+      bubble.innerHTML = DOMPurify.sanitize(marked.parse('⚠️ The server could not complete the request. Please try again.'));
       messages.push({ role: 'bot', text: 'The server could not complete the request.', timestamp: new Date().toISOString() });
       return;
     }
@@ -719,7 +943,8 @@ chatForm.addEventListener('submit', async (e) => {
         
         if (data.type === 'delta') {
           full += data.text || '';
-          bubble.innerHTML = marked.parse(full);
+          // Sanitize streaming content
+          bubble.innerHTML = DOMPurify.sanitize(marked.parse(full));
           smoothScrollToBottom();
           
         } else if (data.type === 'final') {
@@ -728,40 +953,147 @@ chatForm.addEventListener('submit', async (e) => {
           const sources = Array.isArray(data.sources) ? data.sources : [];
           assistantTimestamp = data.timestamp || new Date().toISOString();
           
-          bubble.innerHTML = marked.parse(full);
+          // Sanitize markdown output to prevent XSS
+          bubble.innerHTML = DOMPurify.sanitize(marked.parse(full));
           
           if (grounded && sources.length) {
-            const sourcesHTML = `
-              <div class="sources-divider"></div>
-              <div class="sources-block">
-                <div class="sources-title">Sources</div>
-                <ul class="sources-list">
-                  ${sources.map((s, index) => `
-                    <li class="source-item" data-source-index="${index}">
-                      <div class="source-header">
-                        <span class="file-icon">
-                          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                            <path d="M8 1H3a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V5l-3-4z" stroke="currentColor" stroke-width="1.5"/>
-                            <path d="M8 1v4h3" stroke="currentColor" stroke-width="1.5"/>
-                          </svg>
-                        </span>
-                        <span class="source-filename">${s.filename}</span>
-                        <span class="source-score">(relevance: ${s.score})</span>
-                        ${s.preview ? `
-                          <button class="expand-btn" onclick="toggleSourcePreview(this)" aria-label="Show excerpt">
-                            <svg class="chevron-icon" width="16" height="16" viewBox="0 0 16 16" fill="none">
-                              <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                          </button>
-                        ` : ''}
-                      </div>
-                      ${s.preview ? `<div class="source-preview collapsed">"${s.preview}"</div>` : ''}
-                    </li>
-                  `).join('')}
-                </ul>
-              </div>
-            `;
-            bubble.innerHTML += sourcesHTML;
+            // Create sources HTML safely
+            const sourcesDiv = document.createElement('div');
+            sourcesDiv.className = 'sources-divider';
+            
+            const sourcesBlock = document.createElement('div');
+            sourcesBlock.className = 'sources-block';
+            
+            const sourcesTitle = document.createElement('div');
+            sourcesTitle.className = 'sources-title';
+            sourcesTitle.textContent = 'Sources';
+            
+            const sourcesList = document.createElement('ul');
+            sourcesList.className = 'sources-list';
+            
+            sources.forEach(s => {
+              const li = document.createElement('li');
+              li.className = 'source-item';
+              
+              // Create collapsible header
+              const header = document.createElement('div');
+              header.className = 'source-header';
+              header.style.cssText = `
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                cursor: pointer;
+                padding: 8px 12px;
+                border-radius: 6px;
+                transition: background 0.2s;
+              `;
+              
+              const iconSpan = document.createElement('span');
+              iconSpan.className = 'file-icon';
+              iconSpan.innerHTML = `
+                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                  <path d="M8 1H3a2 2 0 00-2 2v8a2 2 0 002 2h6a2 2 0 002-2V5l-3-4z" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M8 1v4h3" stroke="currentColor" stroke-width="1.5"/>
+                </svg>
+              `;
+              
+              const filenameText = document.createTextNode(s.filename);
+              
+              const relevanceSpan = document.createElement('span');
+              relevanceSpan.style.cssText = 'opacity: 0.6; margin-left: auto; font-size: 12px;';
+              relevanceSpan.textContent = `(relevance: ${s.score})`;
+              
+              const toggleIcon = document.createElement('span');
+              toggleIcon.innerHTML = '▼';
+              toggleIcon.style.cssText = `
+                font-size: 10px;
+                opacity: 0.6;
+                transition: transform 0.2s;
+              `;
+              
+              header.appendChild(iconSpan);
+              header.appendChild(filenameText);
+              header.appendChild(relevanceSpan);
+              header.appendChild(toggleIcon);
+              
+              // Create preview content (initially hidden)
+              const previewDiv = document.createElement('div');
+              previewDiv.className = 'source-preview';
+              previewDiv.style.cssText = `
+                max-height: 0;
+                overflow: hidden;
+                transition: max-height 0.3s ease;
+                padding: 0 12px;
+                margin-top: 4px;
+              `;
+              
+              const previewContent = document.createElement('div');
+              previewContent.style.cssText = `
+                border-left: 2px solid rgba(59, 130, 246, 0.3);
+                padding: 8px 12px;
+                font-size: 12px;
+                color: #94a3b8;
+                line-height: 1.4;
+                font-style: italic;
+                overflow: hidden;
+                text-overflow: ellipsis;
+              `;
+              
+              const contentText = s.content || s.preview;
+              if (contentText) {
+                // Truncate to ~200 characters for compact display
+                const truncated = contentText.length > 200 
+                  ? contentText.substring(0, 200) + '...' 
+                  : contentText;
+                previewContent.textContent = `"${truncated}"`;
+              } else {
+                previewContent.style.opacity = '0.6';
+                previewContent.textContent = 'Content preview not available';
+              }
+              
+              previewDiv.appendChild(previewContent);
+              
+              // Toggle functionality
+              let isExpanded = false;
+              header.addEventListener('click', () => {
+                isExpanded = !isExpanded;
+                if (isExpanded) {
+                  previewDiv.style.maxHeight = '80px';  // Compact height
+                  previewDiv.style.overflow = 'hidden';  // No scroll, just truncated view
+                  previewDiv.style.paddingBottom = '8px';
+                  toggleIcon.style.transform = 'rotate(180deg)';
+                  header.style.background = 'rgba(59, 130, 246, 0.1)';
+                } else {
+                  previewDiv.style.maxHeight = '0';
+                  previewDiv.style.overflow = 'hidden';
+                  previewDiv.style.paddingBottom = '0';
+                  toggleIcon.style.transform = 'rotate(0deg)';
+                  header.style.background = 'transparent';
+                }
+              });
+              
+              // Hover effect
+              header.addEventListener('mouseenter', () => {
+                if (!isExpanded) {
+                  header.style.background = 'rgba(59, 130, 246, 0.05)';
+                }
+              });
+              header.addEventListener('mouseleave', () => {
+                if (!isExpanded) {
+                  header.style.background = 'transparent';
+                }
+              });
+              
+              li.appendChild(header);
+              li.appendChild(previewDiv);
+              sourcesList.appendChild(li);
+            });
+            
+            sourcesBlock.appendChild(sourcesTitle);
+            sourcesBlock.appendChild(sourcesList);
+            
+            bubble.appendChild(sourcesDiv);
+            bubble.appendChild(sourcesBlock);
           }
           
           if (data.model_provider && data.model_name) {
@@ -794,7 +1126,8 @@ chatForm.addEventListener('submit', async (e) => {
     }
   } catch (err) {
     console.error('Chat error:', err);
-    bubble.innerHTML = marked.parse('⚠️ Network error. Please check your connection and try again.');
+    // Sanitize error message
+    bubble.innerHTML = DOMPurify.sanitize(marked.parse('⚠️ Network error. Please check your connection and try again.'));
     messages.push({ role: 'bot', text: 'Network error contacting the server.', timestamp: new Date().toISOString() });
   } finally {
     isStreaming = false;
@@ -822,23 +1155,18 @@ window.addEventListener('load', async () => {
   
   try {
     await Promise.all([loadModels(), refreshDocs()]);
+    setActiveView('chat');
     
-    // 🔹 Restore the last active view (default to 'chat')
-    const savedView = localStorage.getItem('docschat.currentView') || 'chat';
-    setActiveView(savedView);
+    // 🔹 Try to load conversation history
+    const historyLoaded = await loadConversationHistory();
     
-    // 🔹 Try to load conversation history (only if on chat view)
-    if (savedView === 'chat') {
-      const historyLoaded = await loadConversationHistory();
-      
-      // Only show welcome message if no history was loaded
-      if (!historyLoaded) {
-        appendMsg(
-          'bot',
-          'Hello! I\'m your AI document assistant. Upload documents and ask me anything about them. I can help you understand, analyze, and extract information from your files.',
-          { markdown: true, timestamp: new Date().toISOString() }
-        );
-      }
+    // Only show welcome message if no history was loaded
+    if (!historyLoaded) {
+      appendMsg(
+        'bot',
+        'Hello! I\'m your AI document assistant. Upload documents and ask me anything about them. I can help you understand, analyze, and extract information from your files.',
+        { markdown: true, timestamp: new Date().toISOString() }
+      );
     }
   } catch (err) {
     console.error('Initialization error:', err);
@@ -862,32 +1190,3 @@ window.addEventListener('resize', () => {
 window.addEventListener('beforeunload', () => {
   stopTimestampUpdates();
 });
-
-// ==================== Source Preview Toggle ====================
-
-/**
- * Toggle source preview visibility
- * @param {HTMLElement} button - The expand button that was clicked
- */
-function toggleSourcePreview(button) {
-  const sourceItem = button.closest('.source-item');
-  const preview = sourceItem.querySelector('.source-preview');
-  const chevron = button.querySelector('.chevron-icon');
-  
-  if (preview.classList.contains('collapsed')) {
-    // Expand
-    preview.classList.remove('collapsed');
-    preview.classList.add('expanded');
-    chevron.style.transform = 'rotate(180deg)';
-    button.setAttribute('aria-label', 'Hide excerpt');
-  } else {
-    // Collapse
-    preview.classList.remove('expanded');
-    preview.classList.add('collapsed');
-    chevron.style.transform = 'rotate(0deg)';
-    button.setAttribute('aria-label', 'Show excerpt');
-  }
-}
-
-// Make function globally available
-window.toggleSourcePreview = toggleSourcePreview;

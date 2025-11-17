@@ -5,7 +5,7 @@ Handles document retrieval, context building, and streaming responses.
 import json
 import time
 from typing import AsyncGenerator, List, Dict, Optional
-
+from time import perf_counter
 from ..schemas import AskBody
 from ..services.conversation_service import create_conversation, store_message
 from ..services.model_service import resolve_model
@@ -13,6 +13,80 @@ from ..retrieval import search_similar
 from ..utils.helpers import dedupe_sources as _dedupe_sources
 from ..openai_client import client as openai_client
 from ..logging_config import logger
+from ..db import engine
+from sqlalchemy import text
+
+
+def _has_any_documents() -> bool:
+    """Check if there are any documents in the database."""
+    with engine.begin() as conn:
+        result = conn.execute(text("SELECT COUNT(*) FROM documents")).scalar()
+        return result > 0
+
+
+async def _classify_question_intent(question: str, provider: str, model_name: str) -> str:
+    """
+    Use the LLM to classify the question intent.
+    Returns: 'greeting', 'help', or 'factual'
+    
+    This is smarter than hardcoded patterns as it understands context and nuance.
+    Works with any language - classifies intent regardless of language.
+    """
+    classification_prompt = f"""Classify the following user question into ONE category (the question may be in any language):
+
+Categories:
+- "greeting": ONLY simple greetings and casual conversation (hello, hi, namaste, salaam, etc.)
+- "help": ONLY questions about THIS SYSTEM's capabilities (what can you do, how does this work, etc.)
+- "factual": ALL questions seeking information, facts, data, or knowledge about ANY topic
+
+Examples:
+- "hello" → greeting
+- "namaste" → greeting
+- "kaise ho?" (how are you in Hindi) → greeting
+- "what can you do?" → help
+- "What do you know about X?" → factual (seeking information)
+- "X के बारे में क्या जानकारी है?" (what info about X in Hindi) → factual
+- "Who is X?" → factual (seeking information)
+- "Tell me about X" → factual (seeking information)
+- "What are the rules?" → factual (seeking information)
+
+Question: "{question}"
+
+IMPORTANT: If the question is asking about ANY person, place, thing, or topic (not about the system itself), classify it as "factual".
+The question can be in any language, but classify the INTENT.
+
+Respond with ONLY ONE WORD: greeting, help, or factual
+
+Classification:"""
+
+    try:
+        # Use a quick, single-turn completion for classification
+        messages = [{"role": "user", "content": classification_prompt}]
+        
+        response_text = ""
+        if provider == "openai":
+            async for delta in _stream_openai(model_name, messages):
+                response_text += delta
+        else:  # ollama
+            async for delta in _stream_ollama(model_name, messages):
+                response_text += delta
+        
+        # Extract classification
+        intent = response_text.strip().lower()
+        
+        # Validate response
+        if intent in ['greeting', 'help', 'factual']:
+            logger.info("Question classified", question=question[:50], intent=intent)
+            return intent
+        else:
+            # Default to factual if unexpected response
+            logger.warning("Unexpected classification", response=intent, defaulting_to="factual")
+            return 'factual'
+            
+    except Exception as e:
+        logger.error("Intent classification failed", error=str(e))
+        # On error, treat as factual (safer - will search documents)
+        return 'factual'
 
 
 async def handle_rag_query(payload: AskBody) -> AsyncGenerator[str, None]:
@@ -40,7 +114,41 @@ async def handle_rag_query(payload: AskBody) -> AsyncGenerator[str, None]:
     # 3. Store user message
     store_message(chat_id, "user", question)
     
-    # 4. Retrieve relevant chunks
+    # 4. Classify question intent using LLM
+    intent = await _classify_question_intent(question, provider, model_name)
+    is_greeting_or_help = (intent in ['greeting', 'help'])
+    
+    # 5. Handle no documents case
+    if not _has_any_documents() and not is_greeting_or_help:
+        async for event in _stream_no_documents_response(
+            chat_id,
+            provider,
+            model_name,
+            history=payload.history
+        ):
+            yield event
+        
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        logger.info("Query completed (no documents uploaded)", time_ms=elapsed_ms)
+        return
+    
+    # 6. Handle greeting/help questions directly
+    if is_greeting_or_help:
+        # For greetings/help, answer directly without searching documents
+        async for event in _stream_greeting_response(
+            question,
+            chat_id,
+            provider,
+            model_name,
+            history=payload.history
+        ):
+            yield event
+        
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+        logger.info("Query completed (greeting/help)", time_ms=elapsed_ms)
+        return
+    
+    # 7. Search for relevant document chunks
     chunks = search_similar(question, top_k=payload.top_k)
     logger.info("Retrieved chunks", count=len(chunks))
     
@@ -49,7 +157,7 @@ async def handle_rag_query(payload: AskBody) -> AsyncGenerator[str, None]:
         # If nothing meets threshold, take top 2
         strong_chunks = chunks[:2]
     
-    # 5. Handle case with no relevant documents
+    # 8. Handle case with no relevant documents
     if not strong_chunks:
         async for event in _stream_not_found_response(
             chat_id, 
@@ -60,10 +168,10 @@ async def handle_rag_query(payload: AskBody) -> AsyncGenerator[str, None]:
             yield event
         
         elapsed_ms = round((time.time() - start_time) * 1000, 2)
-        logger.info("Query completed (no documents found)", time_ms=elapsed_ms)
+        logger.info("Query completed (no relevant documents found)", time_ms=elapsed_ms)
         return
     
-    # 6. Build context and stream response
+    # 9. Build context and stream response
     # Sort and take top chunks for context
     sorted_chunks = sorted(strong_chunks, key=lambda c: c["score"], reverse=True)[:5]
     
@@ -125,6 +233,157 @@ def _build_context(chunks: List[Dict]) -> str:
         context_parts.append(f"[{i}] {content}")
     
     return "\n\n---\n\n".join(context_parts)
+
+
+async def _stream_greeting_response(
+    question: str,
+    chat_id: int,
+    provider: str,
+    model_name: str,
+    history: Optional[List[Dict]] = None
+) -> AsyncGenerator[str, None]:
+    """
+    Stream a friendly response for greetings and help questions.
+    Uses the LLM to respond naturally without document context.
+    
+    Args:
+        question: The user's question
+        chat_id: The conversation ID
+        provider: The LLM provider
+        model_name: The model name
+        history: Optional conversation history
+        
+    Yields:
+        SSE-formatted event strings
+    """
+    # Send empty sources (no documents needed for greetings)
+    meta_event = {"type": "meta", "sources": []}
+    yield f"data: {json.dumps(meta_event)}\n\n"
+    
+    # Build messages for LLM (same prompt as regular RAG but without context)
+    system_prompt = (
+        "You are a helpful document assistant. You help users understand their uploaded documents.\n\n"
+        
+        "LANGUAGE REQUIREMENT:\n"
+        "- You MUST respond in English ONLY\n"
+        "- Even if the user greets you in another language (Hindi, Spanish, etc.), respond in English\n"
+        "- Example: User says 'Namaste' → You respond 'Hello! How can I help you?'\n\n"
+        
+        "The user is asking a greeting or general help question. Respond warmly and explain your capabilities:\n"
+        "- You can answer questions about uploaded documents (PDF, DOCX, TXT)\n"
+        "- You analyze document content and provide accurate answers\n"
+        "- You cite sources from the documents\n"
+        "- Users should upload documents first, then ask questions about them\n\n"
+        
+        "Be friendly and concise. Don't mention technical details.\n"
+        "ALWAYS respond in English, regardless of the user's language."
+    )
+    
+    messages = [{"role": "system", "content": system_prompt}]
+    
+    # Add conversation history if provided
+    if history:
+        for turn in history:
+            messages.append({
+                "role": turn.role,
+                "content": turn.content
+            })
+    
+    # Add current question
+    messages.append({
+        "role": "user",
+        "content": question
+    })
+    
+    logger.info("Answering greeting/help question", question=question)
+    
+    # Stream response from LLM
+    full_response = ""
+    
+    if provider == "openai":
+        async for delta in _stream_openai(model_name, messages):
+            full_response += delta
+            yield f'data: {json.dumps({"type": "delta", "text": delta})}\n\n'
+    else:  # ollama
+        async for delta in _stream_ollama(model_name, messages):
+            full_response += delta
+            yield f'data: {json.dumps({"type": "delta", "text": delta})}\n\n'
+    
+    # Store assistant message
+    timestamp = store_message(
+        chat_id,
+        "assistant",
+        full_response,
+        model_provider=provider,
+        model_name=model_name,
+        sources=[]
+    )
+    
+    # Send final event
+    final_event = {
+        "type": "final",
+        "text": full_response,
+        "grounded": False,  # Not grounded in documents
+        "sources": [],
+        "model_provider": provider,
+        "model_name": model_name,
+        "conversation_id": chat_id,
+        "timestamp": timestamp.isoformat() if timestamp else None,
+    }
+    yield f"data: {json.dumps(final_event)}\n\n"
+    yield 'data: {"type":"done"}\n\n'
+
+
+async def _stream_no_documents_response(
+    chat_id: int,
+    provider: str,
+    model_name: str,
+    history: Optional[List[Dict]] = None
+) -> AsyncGenerator[str, None]:
+    """
+    Stream a response when no documents have been uploaded yet.
+    
+    Args:
+        chat_id: The conversation ID
+        provider: The LLM provider
+        model_name: The model name
+        history: Optional conversation history
+        
+    Yields:
+        SSE-formatted event strings
+    """
+    no_docs_message = (
+        "Please upload documents first before asking questions. "
+        "Go to the 'Documents' tab to upload PDF, DOCX, or TXT files."
+    )
+    
+    # Send empty sources
+    meta_event = {"type": "meta", "sources": []}
+    yield f"data: {json.dumps(meta_event)}\n\n"
+    
+    # Store assistant message
+    timestamp = store_message(
+        chat_id, 
+        "assistant", 
+        no_docs_message,
+        model_provider=provider,
+        model_name=model_name,
+        sources=[]
+    )
+    
+    # Send final event
+    final_event = {
+        "type": "final",
+        "text": no_docs_message,
+        "grounded": False,
+        "sources": [],
+        "model_provider": provider,
+        "model_name": model_name,
+        "conversation_id": chat_id,
+        "timestamp": timestamp.isoformat() if timestamp else None,
+    }
+    yield f"data: {json.dumps(final_event)}\n\n"
+    yield 'data: {"type":"done"}\n\n'
 
 
 async def _stream_not_found_response(
@@ -209,34 +468,48 @@ async def _stream_rag_response(
     
     # Build messages for LLM
     system_prompt = (
-        "You are a helpful document assistant. You help users understand their uploaded documents.\n\n"
+        "You are a strict document assistant. Your job is to answer ONLY using the CONTEXT provided below.\n\n"
         
-        "HOW TO RESPOND:\n\n"
+        "LANGUAGE REQUIREMENT:\n"
+        "- You MUST respond in English ONLY\n"
+        "- Even if the user asks in another language (Hindi, Spanish, etc.), respond in English\n"
+        "- Translate your answer to English if needed\n"
+        "- Example: User asks in Hindi → You respond in English\n\n"
         
-        "1. GREETINGS & GENERAL QUESTIONS:\n"
-        "   - Be friendly and helpful for: greetings, how are you, what can you do, etc.\n"
-        "   - Example: \"Hello! I'm your document assistant. I can help you understand "
-        "and extract information from your uploaded documents.\"\n\n"
+        "CRITICAL RULES - YOU MUST FOLLOW THESE:\n\n"
         
-        "2. FACTUAL/INFORMATION QUESTIONS:\n"
-        "   - Use ONLY information from the PROVIDED CONTEXT below\n"
-        "   - For questions about facts, names, dates, rules: answer ONLY if explicitly in the CONTEXT\n"
-        "   - For analysis/opinion questions (who is best, what do you think): analyze the data in the CONTEXT\n"
-        "   - Example: If asked 'who is the best captain' and CONTEXT has captain statistics, "
-        "analyze the stats and provide an informed answer based on the data\n"
-        "   - If the CONTEXT has relevant data, USE IT even for opinion questions\n"
-        "   - ONLY say 'I don't have information' if the CONTEXT is completely unrelated to the question\n\n"
+        "1. For FACTUAL questions (who, what, when, where, which):\n"
+        "   - Answer ONLY if the exact information is in the CONTEXT\n"
+        "   - DO NOT use your general knowledge or training data\n"
+        "   - DO NOT make educated guesses\n"
+        "   - If the answer is not explicitly stated in CONTEXT, say: "
+        "\"I don't have information about that in the uploaded documents.\"\n\n"
         
-        "3. FOLLOW-UP QUESTIONS:\n"
-        "   - Use conversation history to understand context\n"
-        "   - If user says 'tell me more', refer to previous discussion\n\n"
+        "2. For ANALYSIS questions (who is best, what do you think):\n"
+        "   - ONLY analyze data that exists in the CONTEXT\n"
+        "   - If CONTEXT has statistics/data, analyze it\n"
+        "   - If CONTEXT doesn't have the data needed, say: "
+        "\"I don't have information about that in the uploaded documents.\"\n\n"
         
-        "IMPORTANT: If the CONTEXT contains relevant information, always use it to answer, "
-        "even if the question requires some interpretation or analysis of the data.\n"
+        "3. Examples:\n"
+        "   - Q: \"Who was the captain in 2023?\" + CONTEXT has no captain names "
+        "→ \"I don't have information about that\"\n"
+        "   - Q: \"Who was the captain in 2023?\" + CONTEXT mentions \"Rohit Sharma was captain in 2023\" "
+        "→ \"Based on the document, Rohit Sharma was the captain in 2023\"\n\n"
+        
+        "4. NEVER:\n"
+        "   - Use information from your training data\n"
+        "   - Make assumptions beyond what's written\n"
+        "   - Combine general knowledge with document knowledge\n"
+        "   - Respond in any language other than English\n\n"
+        
+        "Remember: When in doubt, say you don't have the information. "
+        "It's better to say 'I don't know' than to provide information not in the CONTEXT.\n"
+        "ALWAYS respond in English, regardless of the user's language.\n"
     )
     
     messages = [{"role": "system", "content": system_prompt}]
-    
+    t = perf_counter()
     # Add conversation history if provided
     if history:
         for turn in history:
@@ -280,7 +553,7 @@ async def _stream_rag_response(
         model_name=model_name,
         sources=sources
     )
-    
+    logger.info("Received response from LLM in %.2f seconds", perf_counter() - t)
     # Send final event
     final_event = {
         "type": "final",

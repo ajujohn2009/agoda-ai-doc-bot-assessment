@@ -1,17 +1,35 @@
-
+# Web Framework
 fastapi==0.115.2
 uvicorn[standard]==0.30.6
+
+# LLM Providers
 openai>=1.40.0
-python-dotenv>=1.0.1
 
-aiohttp
-psycopg2-binary
-SQLAlchemy>=2.0
-pgvector>=0.2.5
-sentence-transformers
-pypdf
-python-docx
-python-multipart
+# HTTP Client (async)
+aiohttp==3.9.5
 
-structlog
-colorama
+# Database
+psycopg2-binary==2.9.9
+SQLAlchemy==2.0.23
+pgvector==0.2.5
+
+# ML/Embeddings
+# Using latest compatible versions to avoid deprecation warnings
+sentence-transformers==3.0.1
+transformers==4.44.2
+torch>=2.0.0
+huggingface-hub==0.24.6
+
+# Document Processing
+pypdf==3.17.4
+python-docx==1.1.0
+
+# File Uploads
+python-multipart==0.0.6
+
+# Configuration
+python-dotenv==1.0.1
+
+# Logging
+structlog==24.1.0
+colorama==0.4.6
