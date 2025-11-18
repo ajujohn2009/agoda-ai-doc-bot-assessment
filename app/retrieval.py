@@ -4,8 +4,19 @@ from .db import engine
 from time import perf_counter
 from .embedding import embed_texts
 from .logging_config import logger
+
 def search_similar(query: str, top_k: int = 5) -> List[Dict]:
-    qv = embed_texts([query])[0]  # list[float], len should match your column dim (e.g., 384)
+    """
+        Search for similar chunks in the database.
+
+        Parameters:
+        query (str): The query string to search for.
+        top_k (int): The number of top similar chunks to return. Defaults to 5.
+
+        Returns:
+        List[Dict]: A list of dictionaries containing the similar chunks.
+    """
+    qv = embed_texts([query])[0]
     t = perf_counter()
     
     with engine.begin() as conn:
