@@ -904,7 +904,7 @@ chatForm.addEventListener('submit', async (e) => {
         question: q,
         history,
         top_k: 5,
-        min_score: 0.45,
+        min_score: 0.15,
         model: chosenModel,
         chat_id: currentChatId || null
       })

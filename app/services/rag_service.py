@@ -156,6 +156,7 @@ async def handle_rag_query(payload: AskBody) -> AsyncGenerator[str, None]:
     if not strong_chunks and chunks:
         # If nothing meets threshold, take top 2
         strong_chunks = chunks[:2]
+
     
     # 8. Handle case with no relevant documents
     if not strong_chunks:
@@ -468,44 +469,45 @@ async def _stream_rag_response(
     
     # Build messages for LLM
     system_prompt = (
-        "You are a strict document assistant. Your job is to answer ONLY using the CONTEXT provided below.\n\n"
-        
-        "LANGUAGE REQUIREMENT:\n"
-        "- You MUST respond in English ONLY\n"
-        "- Even if the user asks in another language (Hindi, Spanish, etc.), respond in English\n"
-        "- Translate your answer to English if needed\n"
-        "- Example: User asks in Hindi → You respond in English\n\n"
-        
-        "CRITICAL RULES - YOU MUST FOLLOW THESE:\n\n"
-        
-        "1. For FACTUAL questions (who, what, when, where, which):\n"
-        "   - Answer ONLY if the exact information is in the CONTEXT\n"
-        "   - DO NOT use your general knowledge or training data\n"
-        "   - DO NOT make educated guesses\n"
-        "   - If the answer is not explicitly stated in CONTEXT, say: "
-        "\"I don't have information about that in the uploaded documents.\"\n\n"
-        
-        "2. For ANALYSIS questions (who is best, what do you think):\n"
-        "   - ONLY analyze data that exists in the CONTEXT\n"
-        "   - If CONTEXT has statistics/data, analyze it\n"
-        "   - If CONTEXT doesn't have the data needed, say: "
-        "\"I don't have information about that in the uploaded documents.\"\n\n"
-        
-        "3. Examples:\n"
-        "   - Q: \"Who was the captain in 2023?\" + CONTEXT has no captain names "
-        "→ \"I don't have information about that\"\n"
-        "   - Q: \"Who was the captain in 2023?\" + CONTEXT mentions \"Rohit Sharma was captain in 2023\" "
-        "→ \"Based on the document, Rohit Sharma was the captain in 2023\"\n\n"
-        
-        "4. NEVER:\n"
-        "   - Use information from your training data\n"
-        "   - Make assumptions beyond what's written\n"
-        "   - Combine general knowledge with document knowledge\n"
-        "   - Respond in any language other than English\n\n"
-        
-        "Remember: When in doubt, say you don't have the information. "
-        "It's better to say 'I don't know' than to provide information not in the CONTEXT.\n"
-        "ALWAYS respond in English, regardless of the user's language.\n"
+        """
+            You are a strict Document Grounding Assistant.
+
+            Your job is to answer ONLY using the information found in the CONTEXT provided below.
+
+            You MUST follow these rules:
+
+            1. Use ONLY the text from the CONTEXT. 
+            - Do NOT add examples, do NOT guess, do NOT include general knowledge.
+            - If the user asks something that is not explicitly in the CONTEXT, answer:
+                "I don't have information about that in the uploaded documents."
+
+            2. When answering:
+            - First QUOTE the exact sentence(s) from the CONTEXT that support your answer.
+            - Then give a SHORT summary in your own words.
+            This prevents hallucination.
+
+            3. If the CONTEXT contains partial information:
+            - Only summarize what IS present.
+            - Do NOT expand the answer with assumptions.
+
+            4. If the answer requires a list:
+            - Only list items that appear EXACTLY in the CONTEXT.
+            - Never invent items (e.g., Visa, PayPal, etc.) unless they appear verbatim.
+
+            5. Respond ONLY in English.
+
+            6. If the CONTEXT is irrelevant to the question:
+            - Say: "I don't have information about that in the uploaded documents."
+
+            7. Never use ANY external knowledge, even if the answer is obvious.
+
+            Your format MUST be:
+
+            <your summary>
+
+            If no evidence exists, return:
+            "I don't have information about that in the uploaded documents."
+        """
     )
     
     messages = [{"role": "system", "content": system_prompt}]
@@ -535,6 +537,7 @@ async def _stream_rag_response(
     full_response = ""
     
     if provider == "openai":
+        
         async for delta in _stream_openai(model_name, messages):
             full_response += delta
             yield f'data: {json.dumps({"type": "delta", "text": delta})}\n\n'
@@ -554,6 +557,7 @@ async def _stream_rag_response(
         sources=sources
     )
     logger.info("Received response from LLM in %.2f seconds", perf_counter() - t)
+    logger.info("model used -> %s", model_name)
     # Send final event
     final_event = {
         "type": "final",
@@ -580,6 +584,7 @@ async def _stream_openai(model_name: str, messages: List[Dict]) -> AsyncGenerato
     Yields:
         Text deltas from the streaming response
     """
+    logger.info("Sent request to OpenAI API")
     stream_response = openai_client.chat.completions.create(
         model=model_name,
         messages=messages,
@@ -605,7 +610,7 @@ async def _stream_ollama(model_name: str, messages: List[Dict]) -> AsyncGenerato
         Text deltas from the streaming response
     """
     from ..ollama_client import stream_ollama_chat
-    
+    logger.info("Sent request to Ollama model")
     async for delta_event in stream_ollama_chat(model_name, messages):
         if delta_event.get("type") == "delta":
             yield delta_event["text"]

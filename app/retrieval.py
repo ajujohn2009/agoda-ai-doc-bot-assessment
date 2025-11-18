@@ -25,6 +25,5 @@ def search_similar(query: str, top_k: int = 5) -> List[Dict]:
             """),
             {"qv": qv, "k": top_k},
         ).mappings().all()
-    # print(rows)
     logger.info('''Search for similar chunks in %.2f ms''', (perf_counter() - t) * 1000)
     return [dict(r) for r in rows]
